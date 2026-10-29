@@ -6,7 +6,8 @@ What's new:
     and context window — so the main thread stays clean and a focused agent
     handles a focused job.
   - `ClaudeAgentOptions(agents={"code-reviewer": AgentDefinition(...)})`
-    registers it. The main agent delegates by calling the `Task` tool with
+    registers it. The main agent delegates by calling the `Agent` tool
+    (legacy name: `Task`) with
     `subagent_type="code-reviewer"` — that spawns the subagent, runs it to
     completion, and returns its final answer as the tool result.
 
@@ -75,16 +76,18 @@ async def main() -> None:
     options = ClaudeAgentOptions(
         cwd=str(repo),
         setting_sources=[],
-        # The main agent can browse the repo AND dispatch to subagents via Task.
-        allowed_tools=["Read", "Glob", "Grep", "Task"],
+        # The main agent can browse the repo AND dispatch to subagents.
+        # Current Claude Code names the delegation tool "Agent"; "Task" is its
+        # legacy name, still accepted. Allow both so older CLIs keep working.
+        allowed_tools=["Read", "Glob", "Grep", "Agent", "Task"],
         disallowed_tools=DISALLOWED,
         model="claude-sonnet-4-6",
         agents={"code-reviewer": CODE_REVIEWER},
         system_prompt=(
             "You are a tech lead. Browse the repo yourself using ONLY the "
             "Read, Glob, and Grep tools — do NOT delegate exploration. Pick "
-            "ONE source file worth a closer look, then call the Task tool "
-            "EXACTLY ONCE with subagent_type='code-reviewer' (never any other "
+            "ONE source file worth a closer look, then call the Agent (Task) "
+            "tool EXACTLY ONCE with subagent_type='code-reviewer' (never any other "
             "subagent_type — not 'Explore', not 'general-purpose', not "
             "anything else) and pass the file path in the prompt. After the "
             "subagent returns, summarize its findings in 2-3 sentences. "

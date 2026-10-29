@@ -87,9 +87,12 @@ def render_message(message) -> None:
                 print(f"{_label(color, tag)}\n{_render_tool_result(block.content)}\n")
 
     elif isinstance(message, ResultMessage):
+        # total_cost_usd is Optional in current SDK releases (float | None).
+        cost = message.total_cost_usd
+        cost_str = f"${cost:.4f}" if cost is not None else "n/a"
         print(
             f"{_label(MAGENTA, 'done')} "
             f"turns={message.num_turns}  "
-            f"cost=${message.total_cost_usd:.4f}  "
+            f"cost={cost_str}  "
             f"duration={message.duration_ms / 1000:.1f}s"
         )

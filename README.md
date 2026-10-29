@@ -1,45 +1,88 @@
-# Repo Inspector — Claude Agent SDK starter
+# Repo Inspector: a Claude Agent SDK starter
 
-A small agent that explores a local code folder and answers questions about it.
-Built in five layered steps, each adding one core SDK concept.
+Learn the [Claude Agent SDK for Python](https://github.com/anthropics/claude-agent-sdk-python) in five small steps.
+Each step is a standalone script that points an agent at a local code folder and adds **one** core SDK concept on top of the previous step.
+A shared renderer (`_display.py`) prints every tool call and tool result, so you can watch the agent loop as it runs.
+
+## What you'll learn
+
+| Step | SDK concept | What it adds | File |
+|------|-------------|--------------|------|
+| 1 | `query()`, `ClaudeAgentOptions`, `allowed_tools` / `disallowed_tools`, `setting_sources=[]` | One-shot "tour of this repo" using only the built-in `Read`, `Glob`, `Grep` tools (model: `claude-haiku-4-5`) | [`step1_summarize.py`](step1_summarize.py) |
+| 2 | `ClaudeSDKClient` | Multi-turn `you>` REPL: one session across many `client.query()` calls, so follow-up questions keep context | [`step2_chat.py`](step2_chat.py) |
+| 3 | `@tool` + `create_sdk_mcp_server` + `mcp_servers` | A custom in-process Python tool, `save_finding(title, body)`, exposed as `mcp__findings__save_finding`; findings are appended to `findings.jsonl` | [`step3_findings.py`](step3_findings.py) |
+| 4 | `HookMatcher` + `PostToolUse` hook | Every `Read` / `Glob` / `Grep` call is logged as one JSON line to `audit.log`, which is printed at the end of the run | [`step4_hooks.py`](step4_hooks.py) |
+| 5 | `AgentDefinition` (subagents) + `agents=` | The main agent picks one file and delegates it to a `code-reviewer` subagent (its own prompt, `Read`-only tools, own context window), then summarizes the review | [`step5_subagent.py`](step5_subagent.py) |
+
+Steps 2 to 5 use `claude-sonnet-4-6`. Shared helper: [`_display.py`](_display.py) renders the SDK message stream.
+
+### Step 5 architecture
+
+Step 5 shows subagents. Custom tools (step 3) and hooks (step 4) are separate scripts. The dashed boxes show where they plug into the same `ClaudeAgentOptions` if you combine the steps yourself.
+
+```mermaid
+flowchart LR
+    U["step5_subagent.py<br/>query(prompt, options)"] --> M["Main agent: tech lead<br/>claude-sonnet-4-6"]
+    M -->|Read / Glob / Grep| R[("Target repo<br/>(cwd)")]
+    M -->|"Agent tool (legacy name: Task)<br/>subagent_type='code-reviewer'"| S["Subagent: code-reviewer<br/>AgentDefinition, tools=['Read']"]
+    S -->|Read| R
+    S -->|up to 3 review comments| M
+    M -->|"message stream"| D["_display.render_message()<br/>terminal output"]
+
+    T["step 3: @tool save_finding<br/>via create_sdk_mcp_server"] -.-> M
+    H["step 4: PostToolUse hook<br/>HookMatcher → audit.log"] -.-> M
+```
 
 ## Setup
+
+Requires Python 3.10+ (the SDK's minimum) and an Anthropic API key. The `claude-agent-sdk` wheel bundles the Claude Code CLI.
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install claude-agent-sdk python-dotenv
-cp .env.example .env  # or just edit .env directly
-# put your ANTHROPIC_API_KEY in .env
+pip install -r requirements.txt   # claude-agent-sdk, python-dotenv
+cp .env.example .env
+# put your ANTHROPIC_API_KEY in .env (.env is gitignored)
 ```
 
 ## Run
 
-Each step is standalone. Pass the path to any repo you want to inspect:
+Each step is standalone. Pass the path to any repo you want to inspect (default: current directory):
 
 ```bash
 python step1_summarize.py ~/some/repo
 python step2_chat.py      ~/some/repo
-python step3_findings.py  ~/some/repo
-python step4_hooks.py     ~/some/repo
+python step3_findings.py  ~/some/repo   # then: cat findings.jsonl
+python step4_hooks.py     ~/some/repo   # then: cat audit.log
 python step5_subagent.py  ~/some/repo
 ```
 
-## What each step teaches
+> **Note:** every run calls the Claude API and costs a small amount. The scripts have no `--help` flag. Any first argument is treated as the repo path and starts a run.
 
-| Step | SDK concept | What's new |
-|------|-------------|------------|
-| 1 | `query()` + `ClaudeAgentOptions` + `allowed_tools` | One-shot prompt against a repo using built-in Read/Glob/Grep |
-| 2 | `ClaudeSDKClient` | Multi-turn REPL — session context is preserved across questions |
-| 3 | `@tool` + `create_sdk_mcp_server` | Custom Python tool the agent can call; findings persisted to `findings.jsonl` |
-| 4 | `HookMatcher` + `PostToolUse` | Audit every file Read/Edit to `audit.log` |
-| 5 | `AgentDefinition` (subagents) | Delegate code review to a specialized subagent |
+## What you'll see
+
+The scripts print the SDK message stream through `_display.render_message()`. Each line gets one of these labels, taken from the code:
+
+| Label | SDK message / block | Shows |
+|-------|---------------------|-------|
+| `[session]` | `SystemMessage` (subtype `init`) | model name and the tool list the session was given |
+| `[assistant]` | `AssistantMessage` → `TextBlock` | the model's text |
+| `[tool-call]` | `AssistantMessage` → `ToolUseBlock` | tool name plus JSON input, e.g. `Read({"file_path": ...})` |
+| `[thinking]` | `AssistantMessage` → `ThinkingBlock` | first 200 chars of thinking, if any |
+| `[tool-result]` / `[tool-error]` | `UserMessage` → `ToolResultBlock` | the tool output, truncated to 400 chars |
+| `[done]` | `ResultMessage` | `turns=…  cost=$…  duration=…s` |
+
+Files written next to the scripts (both gitignored): `findings.jsonl` (step 3, one `{"timestamp","title","body"}` record per finding) and `audit.log` (step 4, one `{"timestamp","tool","input"}` record per tool call, reset each run).
+
+## Compatibility
+
+All scripts were checked with `python -m py_compile` and an import test against **claude-agent-sdk 0.2.174** (bundled Claude Code CLI 2.1.310) on Python 3.12. That check did not call the API. The SDK objects (`@tool`, `create_sdk_mcp_server`, `AgentDefinition`, `ResultMessage`) were also built offline to confirm the current signatures.
 
 ## Built-in tools & why we disallow most of them
 
 Claude Code ships a wide set of built-in tools. The Agent SDK inherits the same tool surface — you opt tools *in* with `allowed_tools` and opt them *out* with `disallowed_tools`. The authoritative reference is the [Tools reference](https://code.claude.com/docs/en/tools-reference) page in Anthropic's docs; this section is a working subset annotated with what each step in this repo does with each tool.
 
-For these demos we want a tight surface: only `Read`, `Glob`, `Grep` (plus `Task` in step 5 and our custom `save_finding` in step 3). Everything else is blocked.
+For these demos we want a tight surface: only `Read`, `Glob`, `Grep` (plus `Agent`, legacy name `Task`, in step 5 and our custom `save_finding` in step 3). Everything else is blocked.
 
 **Why so aggressive?** The main reason isn't safety — it's **learnability**. These scripts exist so you can *watch* the agent loop: each tool call and tool result is printed to the terminal. The fewer tools the model has, the easier those traces are to follow. With the full default surface the model wanders into `Agent`/`Skill`/`Bash` for things `Read` would have handled, and the trace stops being a clean illustration of the SDK concept the step is trying to teach.
 
@@ -155,3 +198,16 @@ For these demos we want a tight surface: only `Read`, `Glob`, `Grep` (plus `Task
 1. **Defense in depth.** If a future SDK release auto-allows a new tool category (a new MCP plumbing tool, say), the explicit `disallowed_tools` still blocks it for these demos.
 2. **Readability.** A reader of the script can see what the author *considered and rejected*, not just what was allowed.
 3. **Subagents inherit differently.** A subagent with `tools=["Read"]` already gets only `Read`, but if you forget the `tools` field, the subagent inherits the parent's whole surface. The disallow list is a backstop for that case.
+
+## Next steps / further reading
+
+- [Agent SDK overview](https://code.claude.com/docs/en/agent-sdk/overview)
+- [Python SDK reference](https://code.claude.com/docs/en/agent-sdk/python): `query()`, `ClaudeSDKClient`, `ClaudeAgentOptions`, message types
+- [Streaming vs single mode](https://code.claude.com/docs/en/agent-sdk/streaming-vs-single-mode) (steps 1 and 2)
+- [Custom tools](https://code.claude.com/docs/en/agent-sdk/custom-tools) (step 3)
+- [Hooks](https://code.claude.com/docs/en/agent-sdk/hooks) (step 4)
+- [Subagents](https://code.claude.com/docs/en/agent-sdk/subagents) (step 5)
+- [Tools reference](https://code.claude.com/docs/en/tools-reference): every built-in tool name
+- [anthropics/claude-agent-sdk-python](https://github.com/anthropics/claude-agent-sdk-python) and [PyPI package](https://pypi.org/project/claude-agent-sdk/)
+
+Ideas to extend it yourself: merge steps 3 to 5 into one agent (custom tool + audit hook + subagent), add a `PreToolUse` hook that blocks reads outside the repo, or set `max_budget_usd` / `max_turns` on `ClaudeAgentOptions` to cap the cost of each run.
